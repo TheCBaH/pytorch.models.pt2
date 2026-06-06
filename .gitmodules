@@ -1,0 +1,3 @@
+[submodule "modules/litert-samples"]
+	path = modules/litert-samples
+	url = https://github.com/google-ai-edge/litert-samples.git

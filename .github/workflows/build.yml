@@ -1,0 +1,110 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+
+  uv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: cache torch hub
+        uses: actions/cache@v4
+        with:
+          path: .torch-cache
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          restore-keys: torch-hub-${{ runner.os }}-
+
+      - name: cache downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            modules/litert-samples/end_to_end/imagenet/data
+            modules/litert-samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
+            modules/litert-samples/end_to_end/imagenet/imagenet_metadata.txt
+          key: downloads-${{ hashFiles('scripts/download.sh') }}
+
+      - name: patch
+        run: make patch.apply
+
+      - name: download
+        run: make download
+
+      - name: convert
+        env:
+          TORCH_HOME: ${{ github.workspace }}/.torch-cache
+        run: make convert
+
+      - name: inference
+        run: make inference
+
+      - name: extract
+        env:
+          TORCH_HOME: ${{ github.workspace }}/.torch-cache
+        run: make extract
+
+  devcontainer:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: devcontainer
+        uses: ./.github/workflows/actions/devcontainer
+        id: devcontainer
+        with:
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: setup
+        run: echo 'EXEC=${{ steps.devcontainer.outputs.exec }}' >> $GITHUB_ENV
+
+      - name: cache torch hub
+        uses: actions/cache@v4
+        with:
+          path: .torch-cache
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          restore-keys: torch-hub-${{ runner.os }}-
+
+      - name: cache downloads
+        uses: actions/cache@v4
+        with:
+          path: |
+            modules/litert-samples/end_to_end/imagenet/data
+            modules/litert-samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
+            modules/litert-samples/end_to_end/imagenet/imagenet_metadata.txt
+          key: downloads-${{ hashFiles('scripts/download.sh') }}
+
+      - name: patch
+        run: ${{ env.EXEC }} make patch.apply
+
+      - name: download
+        run: ${{ env.EXEC }} make download
+
+      - name: convert
+        run: ${{ env.EXEC }} env TORCH_HOME=/workspaces/pytorch.models.pt2/.torch-cache make convert
+
+      - name: inference
+        run: ${{ env.EXEC }} make inference
+
+      - name: extract
+        run: ${{ env.EXEC }} make extract
+
+      - name: diff models
+        run: git diff --exit-code HEAD -- models/

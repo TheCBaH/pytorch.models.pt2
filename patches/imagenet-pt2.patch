@@ -1,0 +1,345 @@
+diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
+index 4805a7a..5fc6da2 100644
+--- a/end_to_end/imagenet/main.py
++++ b/end_to_end/imagenet/main.py
+@@ -13,29 +13,20 @@
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
+ 
+-"""Runs MobileNet classification with LiteRT CompiledModel API.
++"""Runs ImageNet classification with PyTorch exported models.
+ 
+-Also supports converting a pretrained torchvision model to LiteRT (TFLite).
++Supports converting a pretrained torchvision model to PyTorch exported (.pt2) format.
+ """
+ 
+ import argparse
+ import os
+ import sys
+ import numpy as np
+-from ai_edge_litert.compiled_model import CompiledModel
+ from PIL import Image
+ 
+ 
+-_LITERT_TYPE_TO_NP = {
+-    1: np.float32,  # kLiteRtElementTypeFloat32
+-    9: np.int8,  # kLiteRtElementTypeInt8
+-    3: np.uint8,  # kLiteRtElementTypeUInt8
+-    2: np.int32,  # kLiteRtElementTypeInt32
+-}
+-
+-
+ def _default_model_path() -> str:
+-  return os.path.join(os.getcwd(), "mobilenet_v2.tflite")
++  return os.path.join(os.getcwd(), "mobilenet_v2.pt2")
+ 
+ 
+ def _default_label_path(filename: str) -> str:
+@@ -81,44 +72,7 @@ def _load_image(
+   array = np.transpose(array, (2, 0, 1))
+   return array
+ 
+-# Used in the classify path
+-def _infer_input_size(model, signature_index: int) -> tuple[int, int, bool]:
+-  """Infer the model's input HxW and layout (channels_first) for preprocessing."""
+-  default_size = (224, 224)
+-  default_channels_first = True
+-  # Try to infer HxW/layout from the compiled model input metadata; fall back.
+-  try:
+-    requirements = model.get_input_buffer_requirements(0, signature_index)
+-  except Exception:
+-    return default_size[0], default_size[1], default_channels_first
+-  dims = (
+-      requirements.get("dimensions")
+-      or requirements.get("shape")
+-      or requirements.get("dims")
+-  )
+-  if not dims:
+-    return default_size[0], default_size[1], default_channels_first
+-  try:
+-    dims = [int(dim) for dim in dims]
+-  except Exception:
+-    return default_size[0], default_size[1], default_channels_first
+-
+-  # Handle common NCHW/NHWC shapes, tolerating unknown batch or dim values.
+-  if len(dims) == 4:
+-    if dims[1] == 3:
+-      return dims[2], dims[3], True  # NCHW
+-    if dims[-1] == 3:
+-      return dims[1], dims[2], False  # NHWC
+-    if dims[0] in (1, -1):
+-      dims = dims[1:]
+ 
+-  if len(dims) == 3:
+-    if dims[0] == 3:
+-      return dims[1], dims[2], True  # CHW
+-    if dims[-1] == 3:
+-      return dims[0], dims[1], False  # HWC
+-
+-  return default_size[0], default_size[1], default_channels_first
+ 
+ def _pick_preprocess_config(
+     model_path: str, input_height: int, input_width: int
+@@ -151,15 +105,26 @@ def _pick_preprocess_config(
+         "std": np.array([0.5, 0.5, 0.5], dtype=np.float32),
+         "resample": Image.BICUBIC,
+     }
+-  if "efficientnet_b" in model_name:
+-    return {
+-        "resize_size": 600,
+-        "crop_height": 600,
+-        "crop_width": 600,
+-        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
+-        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
+-        "resample": Image.BICUBIC,
+-    }
++  _efficientnet_b_sizes = {
++      "efficientnet_b0": (256, 224),
++      "efficientnet_b1": (256, 240),
++      "efficientnet_b2": (288, 288),
++      "efficientnet_b3": (320, 300),
++      "efficientnet_b4": (384, 380),
++      "efficientnet_b5": (456, 456),
++      "efficientnet_b6": (528, 528),
++      "efficientnet_b7": (600, 600),
++  }
++  for variant, (resize_size, crop_size) in _efficientnet_b_sizes.items():
++    if variant in model_name:
++      return {
++          "resize_size": resize_size,
++          "crop_height": crop_size,
++          "crop_width": crop_size,
++          "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
++          "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
++          "resample": Image.BICUBIC,
++      }
+   crop_height = input_height if input_height > 0 else 224
+   crop_width = input_width if input_width > 0 else 224
+   resize_size = int(round(max(crop_height, crop_width) / 0.875))
+@@ -173,25 +138,8 @@ def _pick_preprocess_config(
+   }
+ 
+ 
+-def _pick_output_dtype(requirements: dict) -> np.dtype:
+-  supported = requirements.get("supported_types", [])
+-  for type_id in (1, 9, 3, 2):
+-    if type_id in supported:
+-      return _LITERT_TYPE_TO_NP[type_id]
+-  if supported:
+-    return _LITERT_TYPE_TO_NP.get(supported[0], np.float32)
+-  return np.float32
+ 
+ 
+-def _read_output(buffer, requirements: dict) -> np.ndarray:
+-  output_dtype = _pick_output_dtype(requirements)
+-  buffer_size = requirements.get("buffer_size", 0)
+-  itemsize = np.dtype(output_dtype).itemsize
+-  num_elements = buffer_size // itemsize if itemsize else buffer_size
+-  if num_elements == 0:
+-    raise ValueError("Output buffer size is zero")
+-  return buffer.read(num_elements, output_dtype)
+-
+ 
+ def _softmax(scores: np.ndarray) -> np.ndarray:
+   scores = scores.astype(np.float32, copy=False)
+@@ -264,7 +212,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
+ def _parse_classify_args(argv: list[str]):
+   parser = argparse.ArgumentParser(description=__doc__)
+   parser.add_argument("--model", default=_default_model_path())
+-  parser.add_argument("--image", required=True)
++  parser.add_argument("--image", required=True, action='append')
+   parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
+   parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
+   parser.add_argument("--top_k", type=int, default=5)
+@@ -273,7 +221,7 @@ def _parse_classify_args(argv: list[str]):
+ 
+ def _parse_convert_args(argv: list[str]):
+   parser = argparse.ArgumentParser(
+-      description="Convert a pretrained torchvision model to LiteRT (TFLite)."
++      description="Convert a pretrained torchvision model to PyTorch exported format (.pt2)."
+   )
+   parser.add_argument(
+       "--arch",
+@@ -302,12 +250,7 @@ def _parse_convert_args(argv: list[str]):
+   parser.add_argument(
+       "--output",
+       default=None,
+-      help="Path to output .tflite file.",
+-  )
+-  parser.add_argument(
+-      "--quantize",
+-      action="store_true",
+-      help="Enable dynamic weight int8 quantization (activations float32).",
++      help="Path to output .pt2 file.",
+   )
+   return parser.parse_args(argv)
+ 
+@@ -422,76 +365,82 @@ def _init_torchvision_model(arch: str):
+ def _convert_pretrained(argv: list[str]) -> int:
+   args = _parse_convert_args(argv)
+   if not args.output:
+-    args.output = os.path.join(os.getcwd(), f"{args.arch}.tflite")
+-  import litert_torch  # pylint: disable=import-outside-toplevel
+-  if args.quantize:
+-    from ai_edge_quantizer import quantizer, recipe  # pylint: disable=import-outside-toplevel
++    args.output = os.path.join(os.getcwd(), f"{args.arch}.pt2")
+ 
+   model, torch, input_height, input_width = _init_torchvision_model(args.arch)
+-  sample_inputs = (torch.randn(1, 3, input_height, input_width),)
+-  edge_model = litert_torch.convert(model, sample_inputs)
+-  if args.quantize:
+-    import tempfile  # pylint: disable=import-outside-toplevel
+-    tmp_path = None
+-    try:
+-      with tempfile.NamedTemporaryFile(suffix=".tflite", delete=False) as tmp:
+-        tmp_path = tmp.name
+-
+-      edge_model.export(tmp_path)
+-      qt = quantizer.Quantizer(tmp_path)
+-      qt.load_quantization_recipe(recipe.dynamic_wi8_afp32())
+-      qt.quantize().export_model(args.output)
+-      print(f"Saved quantized LiteRT model to: {args.output}")
+-    finally:
+-      if tmp_path:
+-        try:
+-          os.remove(tmp_path)
+-        except FileNotFoundError:
+-          print(f"Warning: failed to delete temp file {tmp_path}: {e}", file=sys.stderr)
+-  else:
+-    edge_model.export(args.output)
+-    print(f"Saved LiteRT model to: {args.output}")
++
++  # Create sample input for export
++  sample_input = torch.randn(1, 3, input_height, input_width)
++
++  # Export to ExportedProgram
++  try:
++    exported_program = torch.export.export(model, (sample_input,))
++  except Exception as e:
++    print(f"Error exporting model: {e}", file=sys.stderr)
++    return 1
++
++  # Save the exported program
++  try:
++    torch.export.save(exported_program, args.output)
++    print(f"Saved PyTorch exported model to: {args.output}")
++  except Exception as e:
++    print(f"Error saving model: {e}", file=sys.stderr)
++    return 1
++
+   return 0
+ 
+ 
+ def _classify(argv: list[str]) -> int:
++  import torch  # pylint: disable=import-outside-toplevel
++
+   args = _parse_classify_args(argv)
+ 
+   if not os.path.exists(args.model):
+-    raise FileNotFoundError(f"Model not found: {args.model}")
+-  if not os.path.exists(args.image):
+-    raise FileNotFoundError(f"Image not found: {args.image}")
+-
+-  model = CompiledModel.from_file(args.model)
+-  signature_index = 0
++    print(f"Model not found: {args.model}", file=sys.stderr)
++    return 1
+ 
+-  channels = 3
++  try:
++    exported_program = torch.export.load(args.model)
++  except Exception as e:
++    print(f"Error loading model: {e}", file=sys.stderr)
++    return 1
+ 
+-  input_height, input_width, channels_first = _infer_input_size(model, signature_index)
++  input_height, input_width = 224, 224
+   preprocess = _pick_preprocess_config(args.model, input_height, input_width)
+-  image_array = _load_image(
+-      args.image,
+-      channels,
+-      preprocess["resize_size"],
+-      preprocess["crop_height"],
+-      preprocess["crop_width"],
+-      preprocess["mean"],
+-      preprocess["std"],
+-      preprocess["resample"],
+-  )
+-  if not channels_first:
+-    image_array = np.transpose(image_array, (1, 2, 0))  # CHW -> HWC
+-  input_buffers = model.create_input_buffers(signature_index)
+-  output_buffers = model.create_output_buffers(signature_index)
+-  input_buffers[0].write(image_array)
+-
+-  model.run_by_index(signature_index, input_buffers, output_buffers)
+-
+-  output_requirements = model.get_output_buffer_requirements(0, signature_index)
+-  output_array = _read_output(output_buffers[0], output_requirements)
+-  output_probs = _softmax(output_array.reshape(-1))
+-  labels = _pick_labels_for_output(output_array.size, args)
+-  _print_topk(output_probs, labels, args.top_k)
++  labels = None
++
++  for image_path in args.image:
++    if not os.path.exists(image_path):
++      print(f"Image not found: {image_path}", file=sys.stderr)
++      return 1
++
++    print(f"\n=== {os.path.basename(image_path)} ===")
++
++    image_array = _load_image(
++        image_path,
++        3,
++        preprocess["resize_size"],
++        preprocess["crop_height"],
++        preprocess["crop_width"],
++        preprocess["mean"],
++        preprocess["std"],
++        preprocess["resample"],
++    )
++    image_tensor = torch.from_numpy(image_array).unsqueeze(0).float()
++
++    try:
++      with torch.no_grad():
++        output_tensor = exported_program.module()(image_tensor)
++    except Exception as e:
++      print(f"Error during inference: {e}", file=sys.stderr)
++      return 1
++
++    output_array = output_tensor.squeeze(0).numpy()
++    output_probs = _softmax(output_array.reshape(-1))
++    if labels is None:
++      labels = _pick_labels_for_output(output_array.size, args)
++    _print_topk(output_probs, labels, args.top_k)
++
+   return 0
+ 
+ 
+diff --git a/end_to_end/imagenet/pyproject.toml b/end_to_end/imagenet/pyproject.toml
+index 834201d..4c30057 100644
+--- a/end_to_end/imagenet/pyproject.toml
++++ b/end_to_end/imagenet/pyproject.toml
+@@ -1,19 +1,19 @@
+ [project]
+ name = "imagenet-e2e-sample"
+ version = "0.1.0"
+-description = "A LiteRT sample"
++description = "A PyTorch exported model (PT2) sample"
+ readme = "README.md"
+ requires-python = ">=3.10, <3.14"
+ dependencies = [
+-    "ai-edge-litert>=2.1.2",
+-    "ai-edge-quantizer>=0.4.2",
+-    "litert-torch>=0.8.0",
+     "numpy>=2.2.6",
+     "pillow>=12.0.0",
+     "torch>=2.8.0",
+     "torchvision==0.24.0",
+ ]
+ 
++[tool.uv]
++required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
++
+ [tool.uv.sources]
+ torch = { index = "pytorch" }
+ torchvision = { index = "pytorch" }
