@@ -1,0 +1,48 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: true
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          python-version: '3.13'
+          enable-cache: true
+
+      - name: cache torch hub
+        uses: actions/cache@v4
+        with:
+          path: .torch-cache
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          restore-keys: torch-hub-${{ runner.os }}-
+
+      - name: patch
+        run: make patch.apply
+
+      - name: convert
+        env:
+          TORCH_HOME: ${{ github.workspace }}/.torch-cache
+        run: make convert
+
+      - name: create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Models ${{ github.ref_name }}" \
+            --generate-notes \
+            modules/litert-samples/end_to_end/imagenet/*.pt2
