@@ -1,5 +1,5 @@
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
-index 4805a7a..5fc6da2 100644
+index 4805a7a..60ed31b 100644
 --- a/end_to_end/imagenet/main.py
 +++ b/end_to_end/imagenet/main.py
 @@ -13,29 +13,20 @@
@@ -69,13 +69,13 @@ index 4805a7a..5fc6da2 100644
 -      return dims[1], dims[2], False  # NHWC
 -    if dims[0] in (1, -1):
 -      dims = dims[1:]
- 
+-
 -  if len(dims) == 3:
 -    if dims[0] == 3:
 -      return dims[1], dims[2], True  # CHW
 -    if dims[-1] == 3:
 -      return dims[0], dims[1], False  # HWC
--
+ 
 -  return default_size[0], default_size[1], default_channels_first
  
  def _pick_preprocess_config(
@@ -116,7 +116,7 @@ index 4805a7a..5fc6da2 100644
    crop_height = input_height if input_height > 0 else 224
    crop_width = input_width if input_width > 0 else 224
    resize_size = int(round(max(crop_height, crop_width) / 0.875))
-@@ -173,25 +138,8 @@ def _pick_preprocess_config(
+@@ -173,24 +138,7 @@ def _pick_preprocess_config(
    }
  
  
@@ -128,7 +128,7 @@ index 4805a7a..5fc6da2 100644
 -  if supported:
 -    return _LITERT_TYPE_TO_NP.get(supported[0], np.float32)
 -  return np.float32
- 
+-
  
 -def _read_output(buffer, requirements: dict) -> np.ndarray:
 -  output_dtype = _pick_output_dtype(requirements)
@@ -138,10 +138,9 @@ index 4805a7a..5fc6da2 100644
 -  if num_elements == 0:
 -    raise ValueError("Output buffer size is zero")
 -  return buffer.read(num_elements, output_dtype)
--
+ 
  
  def _softmax(scores: np.ndarray) -> np.ndarray:
-   scores = scores.astype(np.float32, copy=False)
 @@ -264,7 +212,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
  def _parse_classify_args(argv: list[str]):
    parser = argparse.ArgumentParser(description=__doc__)
@@ -174,7 +173,7 @@ index 4805a7a..5fc6da2 100644
    )
    return parser.parse_args(argv)
  
-@@ -422,76 +365,82 @@ def _init_torchvision_model(arch: str):
+@@ -422,76 +365,86 @@ def _init_torchvision_model(arch: str):
  def _convert_pretrained(argv: list[str]) -> int:
    args = _parse_convert_args(argv)
    if not args.output:
@@ -209,12 +208,16 @@ index 4805a7a..5fc6da2 100644
 -    edge_model.export(args.output)
 -    print(f"Saved LiteRT model to: {args.output}")
 +
++  for m in model.modules():
++    if getattr(m, 'inplace', False):
++      m.inplace = False
++
 +  # Create sample input for export
 +  sample_input = torch.randn(1, 3, input_height, input_width)
 +
 +  # Export to ExportedProgram
 +  try:
-+    exported_program = torch.export.export(model, (sample_input,))
++    exported_program = torch.export.export(model, (sample_input,)).run_decompositions()
 +  except Exception as e:
 +    print(f"Error exporting model: {e}", file=sys.stderr)
 +    return 1
