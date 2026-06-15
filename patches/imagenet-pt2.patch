@@ -1,5 +1,5 @@
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
-index 4805a7a..b309cdb 100644
+index 4805a7a..49dc198 100644
 --- a/end_to_end/imagenet/main.py
 +++ b/end_to_end/imagenet/main.py
 @@ -13,29 +13,20 @@
@@ -80,19 +80,35 @@ index 4805a7a..b309cdb 100644
  
  def _pick_preprocess_config(
      model_path: str, input_height: int, input_width: int
-@@ -151,15 +105,26 @@ def _pick_preprocess_config(
+@@ -151,15 +105,46 @@ def _pick_preprocess_config(
          "std": np.array([0.5, 0.5, 0.5], dtype=np.float32),
          "resample": Image.BICUBIC,
      }
 -  if "efficientnet_b" in model_name:
--    return {
++  # mobilenet_v3_large uses resize=232 (not the generic 224/0.875=256)
++  if "mobilenet_v3_large" in model_name:
+     return {
 -        "resize_size": 600,
 -        "crop_height": 600,
 -        "crop_width": 600,
--        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
--        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
++        "resize_size": 232,
++        "crop_height": 224,
++        "crop_width": 224,
+         "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
+         "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 -        "resample": Image.BICUBIC,
--    }
++        "resample": Image.BILINEAR,
+     }
++  # mobilenet_v3_small uses resize=256, crop=224 — matches generic fallback but listed explicitly
++  if "mobilenet_v3_small" in model_name:
++    return {
++        "resize_size": 256,
++        "crop_height": 224,
++        "crop_width": 224,
++        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
++        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
++        "resample": Image.BILINEAR,
++    }
 +  _efficientnet_b_sizes = {
 +      "efficientnet_b0": (256, 224),
 +      "efficientnet_b1": (256, 240),
@@ -116,7 +132,7 @@ index 4805a7a..b309cdb 100644
    crop_height = input_height if input_height > 0 else 224
    crop_width = input_width if input_width > 0 else 224
    resize_size = int(round(max(crop_height, crop_width) / 0.875))
-@@ -173,25 +138,8 @@ def _pick_preprocess_config(
+@@ -173,25 +158,8 @@ def _pick_preprocess_config(
    }
  
  
@@ -142,7 +158,7 @@ index 4805a7a..b309cdb 100644
  
  def _softmax(scores: np.ndarray) -> np.ndarray:
    scores = scores.astype(np.float32, copy=False)
-@@ -264,7 +212,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
+@@ -264,7 +232,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
  def _parse_classify_args(argv: list[str]):
    parser = argparse.ArgumentParser(description=__doc__)
    parser.add_argument("--model", default=_default_model_path())
@@ -151,7 +167,7 @@ index 4805a7a..b309cdb 100644
    parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
    parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
    parser.add_argument("--top_k", type=int, default=5)
-@@ -273,7 +221,7 @@ def _parse_classify_args(argv: list[str]):
+@@ -273,7 +241,7 @@ def _parse_classify_args(argv: list[str]):
  
  def _parse_convert_args(argv: list[str]):
    parser = argparse.ArgumentParser(
@@ -160,7 +176,16 @@ index 4805a7a..b309cdb 100644
    )
    parser.add_argument(
        "--arch",
-@@ -302,12 +250,7 @@ def _parse_convert_args(argv: list[str]):
+@@ -290,6 +258,8 @@ def _parse_convert_args(argv: list[str]):
+           "efficientnet_v2_m",
+           "efficientnet_v2_l",
+           "mobilenet_v2",
++          "mobilenet_v3_large",
++          "mobilenet_v3_small",
+           "resnet18",
+           "resnet34",
+           "resnet50",
+@@ -302,12 +272,7 @@ def _parse_convert_args(argv: list[str]):
    parser.add_argument(
        "--output",
        default=None,
@@ -174,7 +199,22 @@ index 4805a7a..b309cdb 100644
    )
    return parser.parse_args(argv)
  
-@@ -419,79 +362,106 @@ def _init_torchvision_model(arch: str):
+@@ -390,6 +355,14 @@ def _init_torchvision_model(arch: str):
+           torchvision.models.mobilenet_v2,
+           torchvision.models.MobileNet_V2_Weights.IMAGENET1K_V1,
+       ),
++      "mobilenet_v3_large": (
++          torchvision.models.mobilenet_v3_large,
++          torchvision.models.MobileNet_V3_Large_Weights.IMAGENET1K_V2,
++      ),
++      "mobilenet_v3_small": (
++          torchvision.models.mobilenet_v3_small,
++          torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1,
++      ),
+       "resnet18": (
+           torchvision.models.resnet18,
+           torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
+@@ -419,79 +392,106 @@ def _init_torchvision_model(arch: str):
    return model, torch, input_height, input_width
  
  
@@ -263,12 +303,12 @@ index 4805a7a..b309cdb 100644
 -    raise FileNotFoundError(f"Model not found: {args.model}")
 -  if not os.path.exists(args.image):
 -    raise FileNotFoundError(f"Image not found: {args.image}")
+-
+-  model = CompiledModel.from_file(args.model)
+-  signature_index = 0
 +    print(f"Model not found: {args.model}", file=sys.stderr)
 +    return 1
  
--  model = CompiledModel.from_file(args.model)
--  signature_index = 0
--
 -  channels = 3
 +  try:
 +    exported_program = torch.export.load(args.model)
@@ -340,10 +380,10 @@ index 4805a7a..b309cdb 100644
  
  
 diff --git a/end_to_end/imagenet/pyproject.toml b/end_to_end/imagenet/pyproject.toml
-index 834201d..ed588ec 100644
+index 834201d..ced6e9a 100644
 --- a/end_to_end/imagenet/pyproject.toml
 +++ b/end_to_end/imagenet/pyproject.toml
-@@ -1,19 +1,19 @@
+@@ -1,17 +1,14 @@
  [project]
  name = "imagenet-e2e-sample"
  version = "0.1.0"
@@ -363,9 +403,11 @@ index 834201d..ed588ec 100644
 +    "torchvision==0.27.0",
  ]
  
-+[tool.uv]
-+required-environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
-+
  [tool.uv.sources]
- torch = { index = "pytorch" }
- torchvision = { index = "pytorch" }
+@@ -22,4 +19,4 @@ torchvision = { index = "pytorch" }
+ [[tool.uv.index]]
+ name = "pytorch"
+ url = "https://download.pytorch.org/whl/cpu"
+-explicit = true
+\ No newline at end of file
++explicit = true

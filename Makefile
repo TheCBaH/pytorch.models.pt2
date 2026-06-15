@@ -19,6 +19,8 @@ MODELS := \
 	efficientnet_v2_m \
 	efficientnet_v2_l \
 	mobilenet_v2 \
+	mobilenet_v3_large \
+	mobilenet_v3_small \
 	resnet18 \
 	resnet34 \
 	resnet50 \
