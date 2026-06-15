@@ -106,5 +106,5 @@ jobs:
       - name: extract
         run: ${{ env.EXEC }} make extract
 
-      - name: diff models
-        run: git diff --exit-code HEAD -- models/
+      - name: check models
+        run: ${{ env.EXEC }} make check

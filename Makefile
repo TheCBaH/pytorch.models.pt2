@@ -25,7 +25,13 @@ MODELS := \
 	resnet101 \
 	resnet152
 
-.PHONY: download convert inference extract patch.create patch.apply FORCE
+.PHONY: download convert inference extract check patch.create patch.apply FORCE
+
+# ── Check ─────────────────────────────────────────────────────────────────────
+
+# Verify extracted model JSONs match git HEAD; pretty-prints diffs via jq on mismatch
+check:
+	bash $(SCRIPTS_DIR)/check_models.sh $(MODELS_DIR)
 
 # ── Patch ─────────────────────────────────────────────────────────────────────
 
