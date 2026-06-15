@@ -340,7 +340,7 @@ index 4805a7a..b309cdb 100644
  
  
 diff --git a/end_to_end/imagenet/pyproject.toml b/end_to_end/imagenet/pyproject.toml
-index 834201d..4c30057 100644
+index 834201d..ed588ec 100644
 --- a/end_to_end/imagenet/pyproject.toml
 +++ b/end_to_end/imagenet/pyproject.toml
 @@ -1,19 +1,19 @@
@@ -357,8 +357,10 @@ index 834201d..4c30057 100644
 -    "litert-torch>=0.8.0",
      "numpy>=2.2.6",
      "pillow>=12.0.0",
-     "torch>=2.8.0",
-     "torchvision==0.24.0",
+-    "torch>=2.8.0",
+-    "torchvision==0.24.0",
++    "torch>=2.12.0",
++    "torchvision==0.27.0",
  ]
  
 +[tool.uv]
