@@ -1,5 +1,5 @@
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
-index 4805a7a..49dc198 100644
+index 4805a7a..3a7cdc8 100644
 --- a/end_to_end/imagenet/main.py
 +++ b/end_to_end/imagenet/main.py
 @@ -13,29 +13,20 @@
@@ -60,7 +60,7 @@ index 4805a7a..49dc198 100644
 -    dims = [int(dim) for dim in dims]
 -  except Exception:
 -    return default_size[0], default_size[1], default_channels_first
--
+ 
 -  # Handle common NCHW/NHWC shapes, tolerating unknown batch or dim values.
 -  if len(dims) == 4:
 -    if dims[1] == 3:
@@ -69,7 +69,7 @@ index 4805a7a..49dc198 100644
 -      return dims[1], dims[2], False  # NHWC
 -    if dims[0] in (1, -1):
 -      dims = dims[1:]
- 
+-
 -  if len(dims) == 3:
 -    if dims[0] == 3:
 -      return dims[1], dims[2], True  # CHW
@@ -80,7 +80,7 @@ index 4805a7a..49dc198 100644
  
  def _pick_preprocess_config(
      model_path: str, input_height: int, input_width: int
-@@ -151,15 +105,46 @@ def _pick_preprocess_config(
+@@ -151,15 +105,66 @@ def _pick_preprocess_config(
          "std": np.array([0.5, 0.5, 0.5], dtype=np.float32),
          "resample": Image.BICUBIC,
      }
@@ -98,9 +98,29 @@ index 4805a7a..49dc198 100644
          "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 -        "resample": Image.BICUBIC,
 +        "resample": Image.BILINEAR,
-     }
++    }
 +  # mobilenet_v3_small uses resize=256, crop=224 — matches generic fallback but listed explicitly
 +  if "mobilenet_v3_small" in model_name:
++    return {
++        "resize_size": 256,
++        "crop_height": 224,
++        "crop_width": 224,
++        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
++        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
++        "resample": Image.BILINEAR,
++    }
++  # vit_l_16 uses resize=242 (not the generic 224/0.875=256)
++  if "vit_l_16" in model_name:
++    return {
++        "resize_size": 242,
++        "crop_height": 224,
++        "crop_width": 224,
++        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
++        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
++        "resample": Image.BILINEAR,
+     }
++  # vit_b_16, vit_b_32, vit_l_32 use resize=256, crop=224 — matches generic fallback but listed explicitly
++  if "vit_b_16" in model_name or "vit_b_32" in model_name or "vit_l_32" in model_name:
 +    return {
 +        "resize_size": 256,
 +        "crop_height": 224,
@@ -132,7 +152,7 @@ index 4805a7a..49dc198 100644
    crop_height = input_height if input_height > 0 else 224
    crop_width = input_width if input_width > 0 else 224
    resize_size = int(round(max(crop_height, crop_width) / 0.875))
-@@ -173,25 +158,8 @@ def _pick_preprocess_config(
+@@ -173,24 +178,7 @@ def _pick_preprocess_config(
    }
  
  
@@ -144,7 +164,7 @@ index 4805a7a..49dc198 100644
 -  if supported:
 -    return _LITERT_TYPE_TO_NP.get(supported[0], np.float32)
 -  return np.float32
- 
+-
  
 -def _read_output(buffer, requirements: dict) -> np.ndarray:
 -  output_dtype = _pick_output_dtype(requirements)
@@ -154,11 +174,10 @@ index 4805a7a..49dc198 100644
 -  if num_elements == 0:
 -    raise ValueError("Output buffer size is zero")
 -  return buffer.read(num_elements, output_dtype)
--
+ 
  
  def _softmax(scores: np.ndarray) -> np.ndarray:
-   scores = scores.astype(np.float32, copy=False)
-@@ -264,7 +232,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
+@@ -264,7 +252,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
  def _parse_classify_args(argv: list[str]):
    parser = argparse.ArgumentParser(description=__doc__)
    parser.add_argument("--model", default=_default_model_path())
@@ -167,7 +186,7 @@ index 4805a7a..49dc198 100644
    parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
    parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
    parser.add_argument("--top_k", type=int, default=5)
-@@ -273,7 +241,7 @@ def _parse_classify_args(argv: list[str]):
+@@ -273,7 +261,7 @@ def _parse_classify_args(argv: list[str]):
  
  def _parse_convert_args(argv: list[str]):
    parser = argparse.ArgumentParser(
@@ -176,16 +195,20 @@ index 4805a7a..49dc198 100644
    )
    parser.add_argument(
        "--arch",
-@@ -290,6 +258,8 @@ def _parse_convert_args(argv: list[str]):
+@@ -290,6 +278,12 @@ def _parse_convert_args(argv: list[str]):
            "efficientnet_v2_m",
            "efficientnet_v2_l",
            "mobilenet_v2",
 +          "mobilenet_v3_large",
 +          "mobilenet_v3_small",
++          "vit_b_16",
++          "vit_b_32",
++          "vit_l_16",
++          "vit_l_32",
            "resnet18",
            "resnet34",
            "resnet50",
-@@ -302,12 +272,7 @@ def _parse_convert_args(argv: list[str]):
+@@ -302,12 +296,7 @@ def _parse_convert_args(argv: list[str]):
    parser.add_argument(
        "--output",
        default=None,
@@ -199,7 +222,7 @@ index 4805a7a..49dc198 100644
    )
    return parser.parse_args(argv)
  
-@@ -390,6 +355,14 @@ def _init_torchvision_model(arch: str):
+@@ -390,6 +379,30 @@ def _init_torchvision_model(arch: str):
            torchvision.models.mobilenet_v2,
            torchvision.models.MobileNet_V2_Weights.IMAGENET1K_V1,
        ),
@@ -211,10 +234,26 @@ index 4805a7a..49dc198 100644
 +          torchvision.models.mobilenet_v3_small,
 +          torchvision.models.MobileNet_V3_Small_Weights.IMAGENET1K_V1,
 +      ),
++      "vit_b_16": (
++          torchvision.models.vit_b_16,
++          torchvision.models.ViT_B_16_Weights.IMAGENET1K_V1,
++      ),
++      "vit_b_32": (
++          torchvision.models.vit_b_32,
++          torchvision.models.ViT_B_32_Weights.IMAGENET1K_V1,
++      ),
++      "vit_l_16": (
++          torchvision.models.vit_l_16,
++          torchvision.models.ViT_L_16_Weights.IMAGENET1K_V1,
++      ),
++      "vit_l_32": (
++          torchvision.models.vit_l_32,
++          torchvision.models.ViT_L_32_Weights.IMAGENET1K_V1,
++      ),
        "resnet18": (
            torchvision.models.resnet18,
            torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-@@ -419,79 +392,106 @@ def _init_torchvision_model(arch: str):
+@@ -419,79 +432,106 @@ def _init_torchvision_model(arch: str):
    return model, torch, input_height, input_width
  
  
@@ -303,12 +342,12 @@ index 4805a7a..49dc198 100644
 -    raise FileNotFoundError(f"Model not found: {args.model}")
 -  if not os.path.exists(args.image):
 -    raise FileNotFoundError(f"Image not found: {args.image}")
--
--  model = CompiledModel.from_file(args.model)
--  signature_index = 0
 +    print(f"Model not found: {args.model}", file=sys.stderr)
 +    return 1
  
+-  model = CompiledModel.from_file(args.model)
+-  signature_index = 0
+-
 -  channels = 3
 +  try:
 +    exported_program = torch.export.load(args.model)

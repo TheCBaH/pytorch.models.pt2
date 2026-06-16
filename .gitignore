@@ -1,5 +1,6 @@
 .torch-cache/
 models/*/data/weights/*
+!models/*/data/weights/*.json
 models/*/data/sample_inputs/*
 models/*/archive_format
 models/*/archive_version

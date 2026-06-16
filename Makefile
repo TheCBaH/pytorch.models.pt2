@@ -21,6 +21,10 @@ MODELS := \
 	mobilenet_v2 \
 	mobilenet_v3_large \
 	mobilenet_v3_small \
+	vit_b_16 \
+	vit_b_32 \
+	vit_l_16 \
+	vit_l_32 \
 	resnet18 \
 	resnet34 \
 	resnet50 \
