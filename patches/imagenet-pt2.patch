@@ -1,5 +1,5 @@
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
-index 4805a7a..3a7cdc8 100644
+index 4805a7a..2d280b6 100644
 --- a/end_to_end/imagenet/main.py
 +++ b/end_to_end/imagenet/main.py
 @@ -13,29 +13,20 @@
@@ -60,7 +60,7 @@ index 4805a7a..3a7cdc8 100644
 -    dims = [int(dim) for dim in dims]
 -  except Exception:
 -    return default_size[0], default_size[1], default_channels_first
- 
+-
 -  # Handle common NCHW/NHWC shapes, tolerating unknown batch or dim values.
 -  if len(dims) == 4:
 -    if dims[1] == 3:
@@ -75,7 +75,7 @@ index 4805a7a..3a7cdc8 100644
 -      return dims[1], dims[2], True  # CHW
 -    if dims[-1] == 3:
 -      return dims[0], dims[1], False  # HWC
--
+ 
 -  return default_size[0], default_size[1], default_channels_first
  
  def _pick_preprocess_config(
@@ -98,7 +98,7 @@ index 4805a7a..3a7cdc8 100644
          "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 -        "resample": Image.BICUBIC,
 +        "resample": Image.BILINEAR,
-+    }
+     }
 +  # mobilenet_v3_small uses resize=256, crop=224 — matches generic fallback but listed explicitly
 +  if "mobilenet_v3_small" in model_name:
 +    return {
@@ -118,7 +118,7 @@ index 4805a7a..3a7cdc8 100644
 +        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
 +        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 +        "resample": Image.BILINEAR,
-     }
++    }
 +  # vit_b_16, vit_b_32, vit_l_32 use resize=256, crop=224 — matches generic fallback but listed explicitly
 +  if "vit_b_16" in model_name or "vit_b_32" in model_name or "vit_l_32" in model_name:
 +    return {
@@ -152,7 +152,7 @@ index 4805a7a..3a7cdc8 100644
    crop_height = input_height if input_height > 0 else 224
    crop_width = input_width if input_width > 0 else 224
    resize_size = int(round(max(crop_height, crop_width) / 0.875))
-@@ -173,24 +178,7 @@ def _pick_preprocess_config(
+@@ -173,25 +178,8 @@ def _pick_preprocess_config(
    }
  
  
@@ -164,7 +164,7 @@ index 4805a7a..3a7cdc8 100644
 -  if supported:
 -    return _LITERT_TYPE_TO_NP.get(supported[0], np.float32)
 -  return np.float32
--
+ 
  
 -def _read_output(buffer, requirements: dict) -> np.ndarray:
 -  output_dtype = _pick_output_dtype(requirements)
@@ -174,9 +174,10 @@ index 4805a7a..3a7cdc8 100644
 -  if num_elements == 0:
 -    raise ValueError("Output buffer size is zero")
 -  return buffer.read(num_elements, output_dtype)
- 
+-
  
  def _softmax(scores: np.ndarray) -> np.ndarray:
+   scores = scores.astype(np.float32, copy=False)
 @@ -264,7 +252,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
  def _parse_classify_args(argv: list[str]):
    parser = argparse.ArgumentParser(description=__doc__)
@@ -253,7 +254,7 @@ index 4805a7a..3a7cdc8 100644
        "resnet18": (
            torchvision.models.resnet18,
            torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-@@ -419,79 +432,106 @@ def _init_torchvision_model(arch: str):
+@@ -419,85 +432,176 @@ def _init_torchvision_model(arch: str):
    return model, torch, input_height, input_width
  
  
@@ -342,12 +343,12 @@ index 4805a7a..3a7cdc8 100644
 -    raise FileNotFoundError(f"Model not found: {args.model}")
 -  if not os.path.exists(args.image):
 -    raise FileNotFoundError(f"Image not found: {args.image}")
+-
+-  model = CompiledModel.from_file(args.model)
+-  signature_index = 0
 +    print(f"Model not found: {args.model}", file=sys.stderr)
 +    return 1
  
--  model = CompiledModel.from_file(args.model)
--  signature_index = 0
--
 -  channels = 3
 +  try:
 +    exported_program = torch.export.load(args.model)
@@ -367,20 +368,6 @@ index 4805a7a..3a7cdc8 100644
 -      preprocess["mean"],
 -      preprocess["std"],
 -      preprocess["resample"],
--  )
--  if not channels_first:
--    image_array = np.transpose(image_array, (1, 2, 0))  # CHW -> HWC
--  input_buffers = model.create_input_buffers(signature_index)
--  output_buffers = model.create_output_buffers(signature_index)
--  input_buffers[0].write(image_array)
--
--  model.run_by_index(signature_index, input_buffers, output_buffers)
--
--  output_requirements = model.get_output_buffer_requirements(0, signature_index)
--  output_array = _read_output(output_buffers[0], output_requirements)
--  output_probs = _softmax(output_array.reshape(-1))
--  labels = _pick_labels_for_output(output_array.size, args)
--  _print_topk(output_probs, labels, args.top_k)
 +  labels = None
 +
 +  for image_path in args.image:
@@ -415,7 +402,90 @@ index 4805a7a..3a7cdc8 100644
 +      labels = _pick_labels_for_output(output_array.size, args)
 +    _print_topk(output_probs, labels, args.top_k)
 +
++  return 0
++
++
++def _parse_pack_args(argv: list[str]):
++  parser = argparse.ArgumentParser(
++      description="Create a release zip with the model, label files, and pre-processed image tensors."
+   )
+-  if not channels_first:
+-    image_array = np.transpose(image_array, (1, 2, 0))  # CHW -> HWC
+-  input_buffers = model.create_input_buffers(signature_index)
+-  output_buffers = model.create_output_buffers(signature_index)
+-  input_buffers[0].write(image_array)
+-
+-  model.run_by_index(signature_index, input_buffers, output_buffers)
+-
+-  output_requirements = model.get_output_buffer_requirements(0, signature_index)
+-  output_array = _read_output(output_buffers[0], output_requirements)
+-  output_probs = _softmax(output_array.reshape(-1))
+-  labels = _pick_labels_for_output(output_array.size, args)
+-  _print_topk(output_probs, labels, args.top_k)
++  parser.add_argument("--model", required=True, help="Path to .pt2 model file.")
++  parser.add_argument("--image", required=True, action='append', help="Image file(s) to pre-process and bundle.")
++  parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
++  parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
++  parser.add_argument("--output", default=None, help="Output .zip path (default: <model_stem>.release.zip next to the model).")
++  return parser.parse_args(argv)
++
++
++def _pack(argv: list[str]) -> int:
++  import io  # pylint: disable=import-outside-toplevel
++  import zipfile  # pylint: disable=import-outside-toplevel
++  import torch  # pylint: disable=import-outside-toplevel
++
++  args = _parse_pack_args(argv)
++
++  if not os.path.exists(args.model):
++    print(f"Model not found: {args.model}", file=sys.stderr)
++    return 1
++
++  if not args.output:
++    stem = os.path.splitext(os.path.basename(args.model))[0]
++    args.output = os.path.join(os.path.dirname(args.model), f"{stem}.release.zip")
++
++  preprocess = _pick_preprocess_config(args.model, 224, 224)
++
++  with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as zf:
++    zf.write(args.model, os.path.basename(args.model))
++
++    for label_path in (args.labels, args.metadata):
++      if label_path and os.path.exists(label_path):
++        zf.write(label_path, os.path.basename(label_path))
++
++    for image_path in args.image:
++      if not os.path.exists(image_path):
++        print(f"Image not found: {image_path}", file=sys.stderr)
++        return 1
++
++      image_array = _load_image(
++          image_path,
++          3,
++          preprocess["resize_size"],
++          preprocess["crop_height"],
++          preprocess["crop_width"],
++          preprocess["mean"],
++          preprocess["std"],
++          preprocess["resample"],
++      )
++      tensor = torch.from_numpy(image_array).unsqueeze(0).float()
++      buf = io.BytesIO()
++      torch.save(((tensor,), {}), buf)
++      buf.seek(0)
++      stem = os.path.splitext(os.path.basename(image_path))[0]
++      zf.writestr(f"images/{stem}.pt", buf.read())
++
++  print(f"Release zip created: {args.output}")
    return 0
+ 
+ 
+ def main(argv: list[str]) -> int:
+   if argv and argv[0] == "convert":
+     return _convert_pretrained(argv[1:])
++  if argv and argv[0] == "pack":
++    return _pack(argv[1:])
+   return _classify(argv)
  
  
 diff --git a/end_to_end/imagenet/pyproject.toml b/end_to_end/imagenet/pyproject.toml

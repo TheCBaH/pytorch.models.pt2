@@ -82,6 +82,15 @@ FORCE:
 	rm -rf $(MODELS_DIR)/$*/.tmp
 	find $(MODELS_DIR)/$* -name '*.json' -exec git add {} +
 
+# Create release zip with model, label files, and pre-processed image tensors:   make mobilenet_v2.release
+%.release: FORCE
+	uv run --directory $(IMAGENET_DIR) main.py pack \
+		--model $(IMAGENET_DIR)/$*.pt2 \
+		--labels $(IMAGENET_DIR)/imagenet_lsvrc_2015_synsets.txt \
+		--metadata $(IMAGENET_DIR)/imagenet_metadata.txt \
+		$(patsubst %,--image %,$(wildcard $(IMAGE_DIR)/*.jpg)) \
+		--output $(IMAGENET_DIR)/$*.release.zip
+
 # ── All-models targets ────────────────────────────────────────────────────────
 
 # Convert all supported models
@@ -92,3 +101,6 @@ inference: $(addsuffix .inference,$(MODELS))
 
 # Extract all supported models
 extract: $(addsuffix .extract,$(MODELS))
+
+# Create release zips for all models
+release: $(addsuffix .release,$(MODELS))

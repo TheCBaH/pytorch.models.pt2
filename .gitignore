@@ -5,3 +5,4 @@ models/*/data/sample_inputs/*
 models/*/archive_format
 models/*/archive_version
 models/*/byteorder
+modules/litert-samples/end_to_end/imagenet/*.release.zip
