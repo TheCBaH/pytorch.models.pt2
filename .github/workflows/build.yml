@@ -51,6 +51,11 @@ jobs:
       - name: inference
         run: make inference
 
+      - name: test-release
+        env:
+          TORCH_HOME: ${{ github.workspace }}/.torch-cache
+        run: make test-release
+
       - name: extract
         env:
           TORCH_HOME: ${{ github.workspace }}/.torch-cache
@@ -102,6 +107,9 @@ jobs:
 
       - name: inference
         run: ${{ env.EXEC }} make inference
+
+      - name: test-release
+        run: ${{ env.EXEC }} env TORCH_HOME=/workspaces/pytorch.models.pt2/.torch-cache make test-release
 
       - name: extract
         run: ${{ env.EXEC }} make extract
