@@ -46,6 +46,8 @@ patch.create:
 	git -C $(LITERT_DIR) diff \
 	    -- end_to_end/imagenet/main.py \
 	       end_to_end/imagenet/pyproject.toml \
+	       end_to_end/imagenet/conftest.py \
+	       end_to_end/imagenet/test_release.py \
 	    > $(PATCH_FILE)
 
 # Apply patch to a clean submodule checkout
@@ -91,6 +93,13 @@ FORCE:
 		$(patsubst %,--image %,$(wildcard $(IMAGE_DIR)/*.jpg)) \
 		--output $(IMAGENET_DIR)/$*.release.zip
 
+# Test: generate release zip for a model then verify structure and inference:   make mobilenet_v2.test-release
+%.test-release: FORCE
+	uv run --group dev --directory $(IMAGENET_DIR) pytest test_release.py \
+		--arch=$* \
+		$(patsubst %,--image %,$(wordlist 1,3,$(wildcard $(IMAGE_DIR)/*.jpg))) \
+		-v
+
 # ── All-models targets ────────────────────────────────────────────────────────
 
 # Convert all supported models
@@ -104,3 +113,6 @@ extract: $(addsuffix .extract,$(MODELS))
 
 # Create release zips for all models
 release: $(addsuffix .release,$(MODELS))
+
+# Smoke-test release packaging and inference using resnet18 (smallest model)
+test-release: resnet18.test-release

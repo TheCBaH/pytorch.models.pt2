@@ -1,3 +1,89 @@
+diff --git a/end_to_end/imagenet/conftest.py b/end_to_end/imagenet/conftest.py
+new file mode 100644
+index 0000000..547a698
+--- /dev/null
++++ b/end_to_end/imagenet/conftest.py
+@@ -0,0 +1,80 @@
++import os
++import pytest
++
++IMAGENET_DIR = os.path.dirname(os.path.abspath(__file__))
++IMAGE_DIR = os.path.join(IMAGENET_DIR, "data")
++
++
++def pytest_addoption(parser):
++    parser.addoption("--arch", default="resnet18", help="Model architecture (e.g. resnet18).")
++    parser.addoption("--image", action="append", default=None, help="Input image path (repeatable).")
++    parser.addoption(
++        "--labels",
++        default=os.path.join(IMAGENET_DIR, "imagenet_lsvrc_2015_synsets.txt"),
++    )
++    parser.addoption(
++        "--metadata",
++        default=os.path.join(IMAGENET_DIR, "imagenet_metadata.txt"),
++    )
++
++
++@pytest.fixture(scope="session")
++def arch(request):
++    return request.config.getoption("--arch")
++
++
++@pytest.fixture(scope="session")
++def test_images(request):
++    images = request.config.getoption("--image")
++    if not images:
++        if not os.path.isdir(IMAGE_DIR):
++            pytest.skip("No images provided and data/ not found.")
++        images = sorted(
++            os.path.join(IMAGE_DIR, f)
++            for f in os.listdir(IMAGE_DIR)
++            if f.endswith(".jpg")
++        )[:3]
++        if not images:
++            pytest.skip("No .jpg files found in data/")
++    return images
++
++
++@pytest.fixture(scope="session")
++def labels_path(request):
++    return request.config.getoption("--labels")
++
++
++@pytest.fixture(scope="session")
++def metadata_path(request):
++    return request.config.getoption("--metadata")
++
++
++@pytest.fixture(scope="session")
++def model_path(arch):
++    path = os.path.join(IMAGENET_DIR, f"{arch}.pt2")
++    if not os.path.exists(path):
++        pytest.skip(f"Model not found: {path}")
++    return path
++
++
++@pytest.fixture(scope="session")
++def release_zip_path(tmp_path_factory, model_path, arch, test_images, labels_path, metadata_path):
++    import sys
++    sys.path.insert(0, IMAGENET_DIR)
++    import main as imagenet_main
++
++    out = tmp_path_factory.mktemp("release")
++    zip_path = str(out / f"{arch}.release.zip")
++
++    argv = ["--model", model_path, "--output", zip_path]
++    for img in test_images:
++        argv += ["--image", img]
++    if os.path.exists(labels_path):
++        argv += ["--labels", labels_path]
++    if os.path.exists(metadata_path):
++        argv += ["--metadata", metadata_path]
++
++    rc = imagenet_main._pack(argv)
++    assert rc == 0, "_pack() returned non-zero exit code"
++    assert os.path.exists(zip_path), "Release zip was not created"
++    return zip_path
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
 index 4805a7a..2d280b6 100644
 --- a/end_to_end/imagenet/main.py
@@ -489,10 +575,10 @@ index 4805a7a..2d280b6 100644
  
  
 diff --git a/end_to_end/imagenet/pyproject.toml b/end_to_end/imagenet/pyproject.toml
-index 834201d..ced6e9a 100644
+index 834201d..c8c3040 100644
 --- a/end_to_end/imagenet/pyproject.toml
 +++ b/end_to_end/imagenet/pyproject.toml
-@@ -1,17 +1,14 @@
+@@ -1,19 +1,19 @@
  [project]
  name = "imagenet-e2e-sample"
  version = "0.1.0"
@@ -512,11 +598,72 @@ index 834201d..ced6e9a 100644
 +    "torchvision==0.27.0",
  ]
  
++[dependency-groups]
++dev = ["pytest>=8.0"]
++
  [tool.uv.sources]
-@@ -22,4 +19,4 @@ torchvision = { index = "pytorch" }
+ torch = { index = "pytorch" }
+ torchvision = { index = "pytorch" }
+@@ -22,4 +22,4 @@ torchvision = { index = "pytorch" }
  [[tool.uv.index]]
  name = "pytorch"
  url = "https://download.pytorch.org/whl/cpu"
 -explicit = true
 \ No newline at end of file
 +explicit = true
+diff --git a/end_to_end/imagenet/test_release.py b/end_to_end/imagenet/test_release.py
+new file mode 100644
+index 0000000..2fd04e3
+--- /dev/null
++++ b/end_to_end/imagenet/test_release.py
+@@ -0,0 +1,50 @@
++import io
++import os
++import tempfile
++import zipfile
++
++import torch
++
++IMAGENET_NUM_CLASSES = 1000
++
++
++def test_zip_structure(release_zip_path, arch, test_images, labels_path, metadata_path):
++    with zipfile.ZipFile(release_zip_path) as zf:
++        names = set(zf.namelist())
++
++    assert f"{arch}.pt2" in names
++    if os.path.exists(labels_path):
++        assert "imagenet_lsvrc_2015_synsets.txt" in names
++    if os.path.exists(metadata_path):
++        assert "imagenet_metadata.txt" in names
++
++    pt_files = [n for n in names if n.startswith("images/") and n.endswith(".pt")]
++    assert len(pt_files) == len(test_images), (
++        f"Expected {len(test_images)} image tensors, found {len(pt_files)}"
++    )
++
++
++def test_inference_from_zip(release_zip_path, arch):
++    with zipfile.ZipFile(release_zip_path) as zf:
++        pt_names = sorted(n for n in zf.namelist() if n.startswith("images/") and n.endswith(".pt"))
++        assert pt_names, "No image tensors found in zip"
++
++        with tempfile.TemporaryDirectory() as tmp:
++            model_file = os.path.join(tmp, f"{arch}.pt2")
++            with open(model_file, "wb") as f:
++                f.write(zf.read(f"{arch}.pt2"))
++
++            exported = torch.export.load(model_file)
++
++            for pt_name in pt_names:
++                (tensor,), _ = torch.load(io.BytesIO(zf.read(pt_name)), weights_only=True)
++
++                with torch.no_grad():
++                    output = exported.module()(tensor)
++
++                assert output.shape[-1] == IMAGENET_NUM_CLASSES, (
++                    f"{pt_name}: expected output width {IMAGENET_NUM_CLASSES}, got {output.shape[-1]}"
++                )
++                probs = torch.softmax(output.squeeze(0), dim=0)
++                top1 = int(torch.argmax(probs))
++                assert 0 <= top1 < IMAGENET_NUM_CLASSES
