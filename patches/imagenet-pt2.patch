@@ -85,7 +85,7 @@ index 0000000..547a698
 +    assert os.path.exists(zip_path), "Release zip was not created"
 +    return zip_path
 diff --git a/end_to_end/imagenet/main.py b/end_to_end/imagenet/main.py
-index 4805a7a..2d280b6 100644
+index 4805a7a..883ff5f 100644
 --- a/end_to_end/imagenet/main.py
 +++ b/end_to_end/imagenet/main.py
 @@ -13,29 +13,20 @@
@@ -155,13 +155,13 @@ index 4805a7a..2d280b6 100644
 -      return dims[1], dims[2], False  # NHWC
 -    if dims[0] in (1, -1):
 -      dims = dims[1:]
--
+ 
 -  if len(dims) == 3:
 -    if dims[0] == 3:
 -      return dims[1], dims[2], True  # CHW
 -    if dims[-1] == 3:
 -      return dims[0], dims[1], False  # HWC
- 
+-
 -  return default_size[0], default_size[1], default_channels_first
  
  def _pick_preprocess_config(
@@ -184,7 +184,7 @@ index 4805a7a..2d280b6 100644
          "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 -        "resample": Image.BICUBIC,
 +        "resample": Image.BILINEAR,
-     }
++    }
 +  # mobilenet_v3_small uses resize=256, crop=224 — matches generic fallback but listed explicitly
 +  if "mobilenet_v3_small" in model_name:
 +    return {
@@ -194,7 +194,7 @@ index 4805a7a..2d280b6 100644
 +        "mean": np.array([0.485, 0.456, 0.406], dtype=np.float32),
 +        "std": np.array([0.229, 0.224, 0.225], dtype=np.float32),
 +        "resample": Image.BILINEAR,
-+    }
+     }
 +  # vit_l_16 uses resize=242 (not the generic 224/0.875=256)
 +  if "vit_l_16" in model_name:
 +    return {
@@ -238,7 +238,7 @@ index 4805a7a..2d280b6 100644
    crop_height = input_height if input_height > 0 else 224
    crop_width = input_width if input_width > 0 else 224
    resize_size = int(round(max(crop_height, crop_width) / 0.875))
-@@ -173,25 +178,8 @@ def _pick_preprocess_config(
+@@ -173,24 +178,7 @@ def _pick_preprocess_config(
    }
  
  
@@ -250,7 +250,7 @@ index 4805a7a..2d280b6 100644
 -  if supported:
 -    return _LITERT_TYPE_TO_NP.get(supported[0], np.float32)
 -  return np.float32
- 
+-
  
 -def _read_output(buffer, requirements: dict) -> np.ndarray:
 -  output_dtype = _pick_output_dtype(requirements)
@@ -260,11 +260,41 @@ index 4805a7a..2d280b6 100644
 -  if num_elements == 0:
 -    raise ValueError("Output buffer size is zero")
 -  return buffer.read(num_elements, output_dtype)
--
+ 
  
  def _softmax(scores: np.ndarray) -> np.ndarray:
-   scores = scores.astype(np.float32, copy=False)
-@@ -264,7 +252,7 @@ def _print_topk(scores: np.ndarray, labels, top_k: int):
+@@ -249,22 +237,30 @@ def _pick_labels_for_output(output_size: int, args):
+   return labels
+ 
+ 
+-def _print_topk(scores: np.ndarray, labels, top_k: int):
++def _topk_as_dicts(scores: np.ndarray, labels, top_k: int) -> list:
+   flat = scores.reshape(-1)
+   top_k = min(top_k, flat.size)
+-  if top_k == 1:
+-    indices = [int(np.argmax(flat))]
+-  else:
+-    indices = np.argsort(flat)[-top_k:][::-1]
+-  for rank, idx in enumerate(indices, start=1):
+-    label = labels[idx] if labels and idx < len(labels) else f"class_{idx}"
+-    print(f"{rank}: {label} ({flat[idx]:.6f})")
++  indices = [int(np.argmax(flat))] if top_k == 1 else list(np.argsort(flat)[-top_k:][::-1])
++  return [
++      {
++          "rank": rank,
++          "class_index": int(idx),
++          "label": labels[idx] if labels and idx < len(labels) else f"class_{idx}",
++          "probability": float(flat[idx]),
++      }
++      for rank, idx in enumerate(indices, start=1)
++  ]
++
++
++def _print_topk(scores: np.ndarray, labels, top_k: int):
++  for entry in _topk_as_dicts(scores, labels, top_k):
++    print(f"{entry['rank']}: {entry['label']} ({entry['probability']:.6f})")
+ 
+ 
  def _parse_classify_args(argv: list[str]):
    parser = argparse.ArgumentParser(description=__doc__)
    parser.add_argument("--model", default=_default_model_path())
@@ -273,7 +303,7 @@ index 4805a7a..2d280b6 100644
    parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
    parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
    parser.add_argument("--top_k", type=int, default=5)
-@@ -273,7 +261,7 @@ def _parse_classify_args(argv: list[str]):
+@@ -273,7 +269,7 @@ def _parse_classify_args(argv: list[str]):
  
  def _parse_convert_args(argv: list[str]):
    parser = argparse.ArgumentParser(
@@ -282,7 +312,7 @@ index 4805a7a..2d280b6 100644
    )
    parser.add_argument(
        "--arch",
-@@ -290,6 +278,12 @@ def _parse_convert_args(argv: list[str]):
+@@ -290,6 +286,12 @@ def _parse_convert_args(argv: list[str]):
            "efficientnet_v2_m",
            "efficientnet_v2_l",
            "mobilenet_v2",
@@ -295,7 +325,7 @@ index 4805a7a..2d280b6 100644
            "resnet18",
            "resnet34",
            "resnet50",
-@@ -302,12 +296,7 @@ def _parse_convert_args(argv: list[str]):
+@@ -302,12 +304,7 @@ def _parse_convert_args(argv: list[str]):
    parser.add_argument(
        "--output",
        default=None,
@@ -309,7 +339,7 @@ index 4805a7a..2d280b6 100644
    )
    return parser.parse_args(argv)
  
-@@ -390,6 +379,30 @@ def _init_torchvision_model(arch: str):
+@@ -390,6 +387,30 @@ def _init_torchvision_model(arch: str):
            torchvision.models.mobilenet_v2,
            torchvision.models.MobileNet_V2_Weights.IMAGENET1K_V1,
        ),
@@ -340,7 +370,7 @@ index 4805a7a..2d280b6 100644
        "resnet18": (
            torchvision.models.resnet18,
            torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-@@ -419,85 +432,176 @@ def _init_torchvision_model(arch: str):
+@@ -419,85 +440,203 @@ def _init_torchvision_model(arch: str):
    return model, torch, input_height, input_width
  
  
@@ -493,7 +523,7 @@ index 4805a7a..2d280b6 100644
 +
 +def _parse_pack_args(argv: list[str]):
 +  parser = argparse.ArgumentParser(
-+      description="Create a release zip with the model, label files, and pre-processed image tensors."
++      description="Create a release zip with the model, label files, pre-processed image tensors, and inference results."
    )
 -  if not channels_first:
 -    image_array = np.transpose(image_array, (1, 2, 0))  # CHW -> HWC
@@ -512,12 +542,14 @@ index 4805a7a..2d280b6 100644
 +  parser.add_argument("--image", required=True, action='append', help="Image file(s) to pre-process and bundle.")
 +  parser.add_argument("--labels", default=_default_label_path("imagenet_lsvrc_2015_synsets.txt"))
 +  parser.add_argument("--metadata", default=_default_label_path("imagenet_metadata.txt"))
++  parser.add_argument("--top_k", type=int, default=5, help="Number of top predictions to store per image in results.json.")
 +  parser.add_argument("--output", default=None, help="Output .zip path (default: <model_stem>.release.zip next to the model).")
 +  return parser.parse_args(argv)
 +
 +
 +def _pack(argv: list[str]) -> int:
 +  import io  # pylint: disable=import-outside-toplevel
++  import json  # pylint: disable=import-outside-toplevel
 +  import zipfile  # pylint: disable=import-outside-toplevel
 +  import torch  # pylint: disable=import-outside-toplevel
 +
@@ -527,11 +559,24 @@ index 4805a7a..2d280b6 100644
 +    print(f"Model not found: {args.model}", file=sys.stderr)
 +    return 1
 +
++  for image_path in args.image:
++    if not os.path.exists(image_path):
++      print(f"Image not found: {image_path}", file=sys.stderr)
++      return 1
++
 +  if not args.output:
 +    stem = os.path.splitext(os.path.basename(args.model))[0]
 +    args.output = os.path.join(os.path.dirname(args.model), f"{stem}.release.zip")
 +
++  try:
++    exported_program = torch.export.load(args.model)
++  except Exception as e:
++    print(f"Error loading model: {e}", file=sys.stderr)
++    return 1
++
 +  preprocess = _pick_preprocess_config(args.model, 224, 224)
++  labels = None
++  inference_results = {}
 +
 +  with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as zf:
 +    zf.write(args.model, os.path.basename(args.model))
@@ -541,10 +586,6 @@ index 4805a7a..2d280b6 100644
 +        zf.write(label_path, os.path.basename(label_path))
 +
 +    for image_path in args.image:
-+      if not os.path.exists(image_path):
-+        print(f"Image not found: {image_path}", file=sys.stderr)
-+        return 1
-+
 +      image_array = _load_image(
 +          image_path,
 +          3,
@@ -556,13 +597,29 @@ index 4805a7a..2d280b6 100644
 +          preprocess["resample"],
 +      )
 +      tensor = torch.from_numpy(image_array).unsqueeze(0).float()
++
++      with torch.no_grad():
++        output = exported_program.module()(tensor)
++
++      output_array = output.squeeze(0).numpy()
++      if labels is None:
++        labels = _build_imagenet_labels(args.labels, args.metadata, output_array.size)
++      probs = _softmax(output_array.reshape(-1))
++      stem = os.path.splitext(os.path.basename(image_path))[0]
++      inference_results[f"images/{stem}.pt"] = _topk_as_dicts(probs, labels, args.top_k)
++
 +      buf = io.BytesIO()
 +      torch.save(((tensor,), {}), buf)
 +      buf.seek(0)
-+      stem = os.path.splitext(os.path.basename(image_path))[0]
 +      zf.writestr(f"images/{stem}.pt", buf.read())
 +
++    zf.writestr("results.json", json.dumps(inference_results, indent=2))
++
 +  print(f"Release zip created: {args.output}")
++  with zipfile.ZipFile(args.output) as zf:
++    for info in zf.infolist():
++      print(f"  {info.file_size:>12,}  {info.filename}")
++    print(zf.read("results.json").decode())
    return 0
  
  
@@ -613,11 +670,12 @@ index 834201d..c8c3040 100644
 +explicit = true
 diff --git a/end_to_end/imagenet/test_release.py b/end_to_end/imagenet/test_release.py
 new file mode 100644
-index 0000000..2fd04e3
+index 0000000..dc0a87e
 --- /dev/null
 +++ b/end_to_end/imagenet/test_release.py
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,72 @@
 +import io
++import json
 +import os
 +import tempfile
 +import zipfile
@@ -636,6 +694,7 @@ index 0000000..2fd04e3
 +        assert "imagenet_lsvrc_2015_synsets.txt" in names
 +    if os.path.exists(metadata_path):
 +        assert "imagenet_metadata.txt" in names
++    assert "results.json" in names
 +
 +    pt_files = [n for n in names if n.startswith("images/") and n.endswith(".pt")]
 +    assert len(pt_files) == len(test_images), (
@@ -667,3 +726,23 @@ index 0000000..2fd04e3
 +                probs = torch.softmax(output.squeeze(0), dim=0)
 +                top1 = int(torch.argmax(probs))
 +                assert 0 <= top1 < IMAGENET_NUM_CLASSES
++
++
++def test_results_json(release_zip_path, test_images):
++    with zipfile.ZipFile(release_zip_path) as zf:
++        results = json.loads(zf.read("results.json"))
++
++    assert len(results) == len(test_images), (
++        f"Expected {len(test_images)} entries in results.json, got {len(results)}"
++    )
++    for image_path in test_images:
++        stem = os.path.splitext(os.path.basename(image_path))[0]
++        key = f"images/{stem}.pt"
++        assert key in results, f"Missing results for {key}"
++        preds = results[key]
++        assert len(preds) > 0
++        for i, pred in enumerate(preds):
++            assert pred["rank"] == i + 1
++            assert 0 <= pred["class_index"] < IMAGENET_NUM_CLASSES
++            assert isinstance(pred["label"], str) and pred["label"]
++            assert 0.0 < pred["probability"] <= 1.0

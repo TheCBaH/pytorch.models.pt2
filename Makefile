@@ -31,7 +31,7 @@ MODELS := \
 	resnet101 \
 	resnet152
 
-.PHONY: download convert inference extract check patch.create patch.apply FORCE
+.PHONY: download convert inference extract release test.release test-release check patch.create patch.apply FORCE
 
 # ── Check ─────────────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ FORCE:
 	uv run --group dev --directory $(IMAGENET_DIR) pytest test_release.py \
 		--arch=$* \
 		$(patsubst %,--image %,$(wordlist 1,3,$(wildcard $(IMAGE_DIR)/*.jpg))) \
-		-v
+		-v -s
 
 # ── All-models targets ────────────────────────────────────────────────────────
 
@@ -115,4 +115,5 @@ extract: $(addsuffix .extract,$(MODELS))
 release: $(addsuffix .release,$(MODELS))
 
 # Smoke-test release packaging and inference using resnet18 (smallest model)
-test-release: resnet18.test-release
+test.release: resnet18.test-release
+test-release: test.release
