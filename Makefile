@@ -1,6 +1,6 @@
 ROOT         := $(CURDIR)
 LITERT_DIR   := $(ROOT)/modules/litert-samples
-IMAGENET_DIR := $(LITERT_DIR)/end_to_end/imagenet
+IMAGENET_DIR := $(LITERT_DIR)/samples/end_to_end/imagenet
 SCRIPTS_DIR  := $(ROOT)/scripts
 IMAGE_DIR    := $(IMAGENET_DIR)/data
 PATCH_FILE   := $(ROOT)/patches/imagenet-pt2.patch
@@ -44,10 +44,10 @@ check:
 # Capture current submodule edits into patches/imagenet-pt2.patch
 patch.create:
 	git -C $(LITERT_DIR) diff \
-	    -- end_to_end/imagenet/main.py \
-	       end_to_end/imagenet/pyproject.toml \
-	       end_to_end/imagenet/conftest.py \
-	       end_to_end/imagenet/test_release.py \
+	    -- samples/end_to_end/imagenet/main.py \
+	       samples/end_to_end/imagenet/pyproject.toml \
+	       samples/end_to_end/imagenet/conftest.py \
+	       samples/end_to_end/imagenet/test_release.py \
 	    > $(PATCH_FILE)
 
 # Apply patch to a clean submodule checkout

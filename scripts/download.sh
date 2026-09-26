@@ -2,14 +2,14 @@
 # Downloads ImageNet label files and sample test images.
 #
 # Usage: ./download.sh [IMAGE_DIR [LABEL_DIR]]
-#   IMAGE_DIR  Where to save images  (default: <repo_root>/modules/litert-samples/end_to_end/imagenet/data)
-#   LABEL_DIR  Where to save labels  (default: <repo_root>/modules/litert-samples/end_to_end/imagenet)
+#   IMAGE_DIR  Where to save images  (default: <repo_root>/modules/litert-samples/samples/end_to_end/imagenet/data)
+#   LABEL_DIR  Where to save labels  (default: <repo_root>/modules/litert-samples/samples/end_to_end/imagenet)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-IMAGENET_DIR="$REPO_ROOT/modules/litert-samples/end_to_end/imagenet"
+IMAGENET_DIR="$REPO_ROOT/modules/litert-samples/samples/end_to_end/imagenet"
 
 IMAGE_DIR="${1:-$IMAGENET_DIR/data}"
 LABEL_DIR="${2:-$IMAGENET_DIR}"

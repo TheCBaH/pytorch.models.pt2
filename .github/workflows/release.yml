@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .torch-cache
-          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
           restore-keys: torch-hub-${{ runner.os }}-
 
       - name: patch
@@ -53,4 +53,4 @@ jobs:
           gh release create "${{ github.ref_name }}" \
             --title "Models ${{ github.ref_name }}" \
             --generate-notes \
-            modules/litert-samples/end_to_end/imagenet/*.release.zip
+            modules/litert-samples/samples/end_to_end/imagenet/*.release.zip

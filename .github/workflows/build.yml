@@ -25,16 +25,16 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .torch-cache
-          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
           restore-keys: torch-hub-${{ runner.os }}-
 
       - name: cache downloads
         uses: actions/cache@v6
         with:
           path: |
-            modules/litert-samples/end_to_end/imagenet/data
-            modules/litert-samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
-            modules/litert-samples/end_to_end/imagenet/imagenet_metadata.txt
+            modules/litert-samples/samples/end_to_end/imagenet/data
+            modules/litert-samples/samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
+            modules/litert-samples/samples/end_to_end/imagenet/imagenet_metadata.txt
           key: downloads-${{ hashFiles('scripts/download.sh') }}
 
       - name: patch
@@ -84,16 +84,16 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .torch-cache
-          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
+          key: torch-hub-${{ runner.os }}-${{ hashFiles('modules/litert-samples/samples/end_to_end/imagenet/pyproject.toml', 'Makefile') }}
           restore-keys: torch-hub-${{ runner.os }}-
 
       - name: cache downloads
         uses: actions/cache@v6
         with:
           path: |
-            modules/litert-samples/end_to_end/imagenet/data
-            modules/litert-samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
-            modules/litert-samples/end_to_end/imagenet/imagenet_metadata.txt
+            modules/litert-samples/samples/end_to_end/imagenet/data
+            modules/litert-samples/samples/end_to_end/imagenet/imagenet_lsvrc_2015_synsets.txt
+            modules/litert-samples/samples/end_to_end/imagenet/imagenet_metadata.txt
           key: downloads-${{ hashFiles('scripts/download.sh') }}
 
       - name: patch

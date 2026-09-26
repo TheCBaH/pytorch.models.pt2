@@ -10,7 +10,7 @@ PyTorch model export and inference samples using the PT2 (`.pt2`) format.
 
 | Sample | Description |
 |--------|-------------|
-| [ImageNet classification](modules/litert-samples/end_to_end/imagenet/README.md) | Convert and run torchvision ImageNet models (EfficientNet, MobileNet, ResNet) via `torch.export` |
+| [ImageNet classification](modules/litert-samples/samples/end_to_end/imagenet/README.md) | Convert and run torchvision ImageNet models (EfficientNet, MobileNet, ResNet) via `torch.export` |
 
 ## Development
 
